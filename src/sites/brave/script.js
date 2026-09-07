@@ -9,5 +9,11 @@ define BRAVE {
 
     // jump straight to the search box
     focus(gi, "input#searchbox")
-    gotourl(g, "https://github.com/HimadriChakra12/diorite")
+
+    gotourl(gu, "https://github.com/HimadriChakra12/diorite")
+
+    navigate(H, prev)
+
+    scroll(gg, up, full)
+    scroll(G, down, 100)
 }

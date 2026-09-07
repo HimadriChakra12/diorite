@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         diorite
 // @namespace    diorite
-// @version      1.0.0
+// @version      2.0.0
 // @description  Persite Keybinding Program
 // @match        *://*/*
 // @//NAME       //Description
@@ -121,6 +121,15 @@ function doDoubleclick(el) {
 	fireMouseEvent(el, "dblclick");
 }
 
+function doScroll(dir, amount) {
+	if (amount === Infinity) {
+		window.scrollTo({ top: dir === "down" ? 1e9 : 0, behavior: "smooth" });
+		return;
+	}
+	var px = window.innerHeight * (amount / 100);
+	window.scrollBy({ top: dir === "down" ? px : -px, behavior: "smooth" });
+}
+
 var ACTIONS = { focus: doFocus, click: doClick, longpress: doLongpress, doubleclick: doDoubleclick };
 
 var MU = { gotoLoop: gotoLoop, highlight: highlight, isVisible: isVisible };
@@ -132,6 +141,15 @@ function performBinding(b) {
 	}
 	if (b.kind === "url") {
 		location.href = b.value; // works for absolute and relative URLs
+		return;
+	}
+	if (b.kind === "scroll") {
+		doScroll(b.dir, b.amount);
+		return;
+	}
+	if (b.kind === "history") {
+		if (b.dir === "prev") history.back();
+		else history.forward();
 		return;
 	}
 	var el = null;
@@ -209,7 +227,10 @@ Sites.register({
     { keys: "j", action: "focus", kind: "goto", dir: "next", loop: "RESULT" },
     { keys: "k", action: "focus", kind: "goto", dir: "prev", loop: "RESULT" },
     { keys: "gi", action: "focus", kind: "selector", value: "input#searchbox" },
-    { keys: "g", action: "navigate", kind: "url", value: "https://github.com/HimadriChakra12/diorite" }
+    { keys: "gu", action: "navigate", kind: "url", value: "https://github.com/HimadriChakra12/diorite" },
+    { keys: "H", action: "history", kind: "history", dir: "prev" },
+    { keys: "gg", action: "scroll", kind: "scroll", dir: "up", amount: Infinity },
+    { keys: "G", action: "scroll", kind: "scroll", dir: "down", amount: 100 }
   ]
 });
 
