@@ -1,33 +1,27 @@
-#define OUTFILE "" //OUTPUT
-//#define BUILD_WITH_MUJS
+#define OUTFILE "dist/diorite.user.js"
+#define BUILD_WITH_MUJS
 #include "build.h"
-//#include "mujscompiler.h"
+#include "mujscompiler.h"
 
-#define NAME        ""
-#define NAMESPACE   ""
-#define DESCRIPTION ""
+#define NAME        "diorite"
+#define NAMESPACE   "diorite"
+#define DESCRIPTION "Persite Keybinding Program"
 
 listmatch(
-    "",
+    "*://*/*",
     );
 
 listgrant(
-    "unsafeWindow",
-    "GM_download"
+    /* pure DOM APIs only -- no GM_* needed for v1 */
     );
 
-/* Custom @tag lines that don't have a fixed build_meta_t field. */
 listextra(
     { "//NAME", "//Description" },
     );
 
-#define GROUPNAME group( \
-    "src/group/script.js", \
-    )
- 
 listorder(
     "src/start.js",
-    GROUPNAME
+    "src/core.js",
     "src/end.js",
     );
 
@@ -42,10 +36,21 @@ declaremeta(
 );
 
 int main(void) {
+    const char *standalone_files[] = { "src/core.js" };
+    mujs_check_all(standalone_files, 1, "src/");
+
     build_t b;
-    build_init(&b, NULL, "__HLS_SAVER_VERSION__"); 
+    build_init(&b, NULL, "__DIORITE_VERSION__");
     build_userscript_header(&b, &META);
-    build_add_all(&b, ORDER, ORDER_COUNT, "src/");
-    build_finish(&b, NULL); 
+
+    build_add(&b, "src/start.js", "src/");
+    build_add(&b, "src/core.js", "src/");
+
+    mujs_compile_sites_dir(&b, "src/sites");
+
+    build_add(&b, "src/end.js", "src/");
+
+    mujs_check_bundle(&b);
+    build_finish(&b, NULL);
     return 0;
 }

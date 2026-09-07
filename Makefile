@@ -3,8 +3,8 @@
 build: tools/build
 	./tools/build
 
-tools/build: tools/build.c tools/build.h
-	$(CC) -O2 -Wall -Wextra -o tools/build tools/build.c -I tools/build.h
+tools/build: tools/build.c tools/build.h tools/mujscompiler.h
+	$(CC) -O2 -Wall -Wextra -Wno-unused-function -o tools/build tools/build.c -lmujs
 
 clean:
 	rm -rf dist tools/build
