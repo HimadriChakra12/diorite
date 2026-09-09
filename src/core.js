@@ -274,18 +274,19 @@ function performBinding(b) {
 		doScroll(b.dir, b.amount);
 		return;
 	}
-	if (b.kind === "history") {
+	if (b.kind === "navigate") {
 		if (b.dir === "prev") history.back();
-		else history.forward();
-		return;
-	}
-	if (b.kind === "close") {
-		// Privileged via the "window.close" grant declared in build.c
-		// (Tampermonkey/Violentmonkey back this with their own
-		// extension internals) -- unlike ordinary page-JS
-		// window.close(), this actually closes the tab regardless of
-		// how it was opened or its navigation history.
-		window.close();
+		else if (b.dir === "next") history.forward();
+		else if (b.dir === "reload") location.reload();
+		else if (b.dir === "close") {
+			// Privileged via the "window.close" grant declared in
+			// build.c (Tampermonkey/Violentmonkey back this with
+			// their own extension internals) -- unlike ordinary
+			// page-JS window.close(), this actually closes the tab
+			// regardless of how it was opened or its navigation
+			// history.
+			window.close();
+		}
 		return;
 	}
 	if (b.kind === "selected") {

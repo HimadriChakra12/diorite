@@ -13,6 +13,9 @@ define BRAVE {
     gotourl(gu, "https://github.com/HimadriChakra12/diorite")
 
     navigate(H, prev)
+    navigate(x, close)
+    navigate(r, reload)
+    navigate(L, next)
 
     scroll(gg, up, full)
     scroll(G, down, 100)

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         diorite
 // @namespace    diorite
-// @version      3.0.0
+// @version      4.0.0
 // @description  Persite Keybinding Program
 // @match        *://*/*
 // @grant        window.close
@@ -233,13 +233,13 @@ function performBinding(b) {
 		doScroll(b.dir, b.amount);
 		return;
 	}
-	if (b.kind === "history") {
+	if (b.kind === "navigate") {
 		if (b.dir === "prev") history.back();
-		else history.forward();
-		return;
-	}
-	if (b.kind === "close") {
-		window.close();
+		else if (b.dir === "next") history.forward();
+		else if (b.dir === "reload") location.reload();
+		else if (b.dir === "close") {
+			window.close();
+		}
 		return;
 	}
 	if (b.kind === "selected") {
@@ -377,7 +377,10 @@ Sites.register({
     { keys: "k", action: "focus", kind: "goto", dir: "prev", loop: "RESULT" },
     { keys: "gi", action: "focus", kind: "selector", value: "input#searchbox" },
     { keys: "gu", action: "navigate", kind: "url", value: "https://github.com/HimadriChakra12/diorite" },
-    { keys: "H", action: "history", kind: "history", dir: "prev" },
+    { keys: "H", action: "navigate", kind: "navigate", dir: "prev" },
+    { keys: "x", action: "navigate", kind: "navigate", dir: "close" },
+    { keys: "r", action: "navigate", kind: "navigate", dir: "reload" },
+    { keys: "L", action: "navigate", kind: "navigate", dir: "next" },
     { keys: "gg", action: "scroll", kind: "scroll", dir: "up", amount: Infinity },
     { keys: "G", action: "scroll", kind: "scroll", dir: "down", amount: 100 }
   ]
