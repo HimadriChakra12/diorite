@@ -276,8 +276,11 @@ function performBinding(b) {
 	}
 	if (b.kind === "navigate") {
 		if (b.dir === "prev") history.back();
-		else if (b.dir === "next") history.forward();
-		else if (b.dir === "reload") location.reload();
+		else history.forward();
+		return;
+	}
+	if (b.kind === "action") {
+		if (b.dir === "reload") location.reload();
 		else if (b.dir === "close") {
 			// Privileged via the "window.close" grant declared in
 			// build.c (Tampermonkey/Violentmonkey back this with
@@ -378,18 +381,30 @@ function clearAllHighlights() {
 }
 
 document.addEventListener("keydown", function (ev) {
+	// Checked against BOTH ev.target and document.activeElement, not
+	// just one -- rich-text editors (Instagram's Lexical editor is one)
+	// do brief internal focus/blur churn where the two can momentarily
+	// disagree. Relying on only one left a gap where a key like the
+	// trailing "g" in "bang" could get swallowed as a potential prefix
+	// of a binding like "gg" instead of being typed, while very much
+	// still inside the input as far as the user could tell.
+	var editing = isEditableTarget(ev.target) || isEditableTarget(document.activeElement);
+
 	// Escape always exits "insert mode" AND breaks any active loop/goto
 	// cursor -- checked before the editable-target bailout below, since
 	// that's precisely when it's needed.
 	if (ev.key === "Escape") {
-		if (isEditableTarget(ev.target) && ev.target.blur) ev.target.blur();
+		if (editing) {
+			if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+			if (ev.target && ev.target.blur) ev.target.blur();
+		}
 		clearAllHighlights();
 		resetKeyBuffer();
 		return;
 	}
 
 	if (ev.altKey || ev.ctrlKey || ev.metaKey) return;
-	if (isEditableTarget(ev.target)) return; // don't hijack typing; gi/gI got you here
+	if (editing) return; // don't hijack typing; gi/gI got you here
 	if (IGNORED_RAW_KEYS[ev.key]) return;
 
 	var key = normalizeKey(ev.key);

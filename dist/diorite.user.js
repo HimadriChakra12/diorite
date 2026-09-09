@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         diorite
 // @namespace    diorite
-// @version      4.0.0
+// @version      5.0.0
 // @description  Persite Keybinding Program
 // @match        *://*/*
 // @grant        window.close
@@ -235,8 +235,11 @@ function performBinding(b) {
 	}
 	if (b.kind === "navigate") {
 		if (b.dir === "prev") history.back();
-		else if (b.dir === "next") history.forward();
-		else if (b.dir === "reload") location.reload();
+		else history.forward();
+		return;
+	}
+	if (b.kind === "action") {
+		if (b.dir === "reload") location.reload();
 		else if (b.dir === "close") {
 			window.close();
 		}
@@ -312,15 +315,20 @@ function clearAllHighlights() {
 }
 
 document.addEventListener("keydown", function (ev) {
+	var editing = isEditableTarget(ev.target) || isEditableTarget(document.activeElement);
+
 	if (ev.key === "Escape") {
-		if (isEditableTarget(ev.target) && ev.target.blur) ev.target.blur();
+		if (editing) {
+			if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+			if (ev.target && ev.target.blur) ev.target.blur();
+		}
 		clearAllHighlights();
 		resetKeyBuffer();
 		return;
 	}
 
 	if (ev.altKey || ev.ctrlKey || ev.metaKey) return;
-	if (isEditableTarget(ev.target)) return; // don't hijack typing; gi/gI got you here
+	if (editing) return; // don't hijack typing; gi/gI got you here
 	if (IGNORED_RAW_KEYS[ev.key]) return;
 
 	var key = normalizeKey(ev.key);
@@ -375,12 +383,13 @@ Sites.register({
   bindings: [
     { keys: "j", action: "focus", kind: "goto", dir: "next", loop: "RESULT" },
     { keys: "k", action: "focus", kind: "goto", dir: "prev", loop: "RESULT" },
+    { keys: "enter", action: "click", kind: "selected", loops: ["RESULT"] },
     { keys: "gi", action: "focus", kind: "selector", value: "input#searchbox" },
     { keys: "gu", action: "navigate", kind: "url", value: "https://github.com/HimadriChakra12/diorite" },
     { keys: "H", action: "navigate", kind: "navigate", dir: "prev" },
-    { keys: "x", action: "navigate", kind: "navigate", dir: "close" },
-    { keys: "r", action: "navigate", kind: "navigate", dir: "reload" },
     { keys: "L", action: "navigate", kind: "navigate", dir: "next" },
+    { keys: "x", action: "action", kind: "action", dir: "close" },
+    { keys: "r", action: "action", kind: "action", dir: "reload" },
     { keys: "gg", action: "scroll", kind: "scroll", dir: "up", amount: Infinity },
     { keys: "G", action: "scroll", kind: "scroll", dir: "down", amount: 100 }
   ]
