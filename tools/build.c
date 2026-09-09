@@ -4,7 +4,7 @@
 #include "mujscompiler.h"
 
 #define NAME        "diorite"
-#define NAMESPACE   "diorite"
+#define NAMESPACE   "https://github.com/HimadriChakra12/diorite.git"
 #define DESCRIPTION "Persite Keybinding Program"
 
 listmatch(

@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         diorite
-// @namespace    diorite
+// @namespace    https://github.com/HimadriChakra12/diorite.git
 // @version      5.0.0
 // @description  Persite Keybinding Program
 // @match        *://*/*
