@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         diorite
 // @namespace    https://github.com/HimadriChakra12/diorite.git
-// @version      5.0.0
-// @description  Persite Keybinding Program
+// @version      6.0.0
+// @description  Persite Keybinding Userscript
 // @match        *://*/*
 // @grant        window.close
 // @//NAME       //Description
@@ -68,6 +68,16 @@ function universalSites() {
 	return Sites.list.filter(isUniversal);
 }
 
+function dedupeLastWins(bindings) {
+	var byKey = {};
+	var order = [];
+	bindings.forEach(function (b) {
+		if (!byKey.hasOwnProperty(b.keys)) order.push(b.keys);
+		byKey[b.keys] = b; // last one written wins
+	});
+	return order.map(function (k) { return byKey[k]; });
+}
+
 function effectiveBindings() {
 	var seen = {};
 	var result = [];
@@ -78,8 +88,8 @@ function effectiveBindings() {
 	}
 
 	var specific = activeSite();
-	if (specific) addAll(specific.bindings);
-	universalSites().forEach(function (site) { addAll(site.bindings); });
+	if (specific) addAll(dedupeLastWins(specific.bindings));
+	universalSites().forEach(function (site) { addAll(dedupeLastWins(site.bindings)); });
 	addAll(DEFAULT_BINDINGS);
 
 	return result;
@@ -245,6 +255,9 @@ function performBinding(b) {
 		}
 		return;
 	}
+	if (b.kind === "off") {
+		return;
+	}
 	if (b.kind === "selected") {
 		var act = ACTIONS[b.action];
 		if (act) resolveSelected(b.loops).forEach(act);
@@ -391,7 +404,8 @@ Sites.register({
     { keys: "x", action: "action", kind: "action", dir: "close" },
     { keys: "r", action: "action", kind: "action", dir: "reload" },
     { keys: "gg", action: "scroll", kind: "scroll", dir: "up", amount: Infinity },
-    { keys: "G", action: "scroll", kind: "scroll", dir: "down", amount: 100 }
+    { keys: "G", action: "scroll", kind: "scroll", dir: "down", amount: 100 },
+    { keys: "r", action: "off", kind: "off" }
   ]
 });
 
@@ -406,6 +420,19 @@ Sites.register({
     { keys: "L", action: "click", kind: "selector", value: "button[aria-label='Lyrics']" },
     { keys: "m", action: "click", kind: "selector", value: "button[aria-label='Mute'] , button[aria-label='Unmute']" },
     { keys: "f", action: "click", kind: "selector", value: "button[aria-label='Enter Full screen']" }
+  ]
+});
+
+Sites.register({
+  name: "UNIVERSAL",
+  match: [],
+  loops: {},
+  bindings: [
+    { keys: "j", action: "scroll", kind: "scroll", dir: "down", amount: 50 },
+    { keys: "k", action: "scroll", kind: "scroll", dir: "up", amount: 50 },
+    { keys: "r", action: "action", kind: "action", dir: "reload" },
+    { keys: "H", action: "navigate", kind: "navigate", dir: "prev" },
+    { keys: "L", action: "navigate", kind: "navigate", dir: "next" }
   ]
 });
 

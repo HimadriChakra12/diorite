@@ -5,7 +5,7 @@
 
 #define NAME        "diorite"
 #define NAMESPACE   "https://github.com/HimadriChakra12/diorite.git"
-#define DESCRIPTION "Persite Keybinding Program"
+#define DESCRIPTION "Persite Keybinding Userscript"
 
 listmatch(
     "*://*/*",

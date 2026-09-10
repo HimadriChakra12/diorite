@@ -13,17 +13,21 @@ header can't safely replace them."
 #include <dirent.h>
 #include <sys/stat.h>
 
+/* =========================================================================
+ * PART 1 -- syntax checking (unchanged in spirit: parse-only sanity net)
+ * ========================================================================= */
+
 static void mujs_syntax_check(const char *code, const char *label) {
     const char *what = label ? label : "<bundle>";
 
     js_State *J = js_newstate(NULL, NULL, JS_STRICT);
     if (!J) {
-        fprintf(stderr, "MUJS: could not create MuJS state\n");
+        fprintf(stderr, "mujscompiler: could not create MuJS state\n");
         exit(1);
     }
 
     if (js_ploadstring(J, what, code)) {
-        fprintf(stderr, "MUJS: syntax error in %s:\n  %s\n",
+        fprintf(stderr, "mujscompiler: syntax error in %s:\n  %s\n",
                 what, js_trystring(J, -1, "error"));
         js_freestate(J);
         exit(1);
@@ -47,7 +51,7 @@ static void mujs_check_all(const char *const *paths, size_t count, const char *s
         mujs_syntax_check(content, display);
         free(content);
     }
-    printf("MUJS: %zu file(s) OK\n", count);
+    printf("mujscompiler: %zu file(s) OK\n", count);
 }
 
 static void mujs_check_bundle(const build_t *b) {
@@ -59,8 +63,47 @@ static void mujs_check_bundle(const build_t *b) {
     mujs_syntax_check(tmp, "bundle");
     free(tmp);
 
-    printf("MUJS: bundle OK (%zu bytes)\n", b->out_len);
+    printf("mujscompiler: bundle OK (%zu bytes)\n", b->out_len);
 }
+
+/* =========================================================================
+ * PART 2 -- the site DSL compiler
+ *
+ * Site scripts (src/sites/<name>/script.js) are written in a small
+ * sugar-on-top-of-JS DSL:
+ *
+ *   define KAGI {
+ *       url("wildcard-scheme-and-host-pattern, e.g. star colon-slash-slash kagi.com slash star")
+ *       loop("RESULT", ".search-result")
+ *
+ *       function ANIMATE(el) {
+ *           el.classList.add("mu-pulse");
+ *       }
+ *
+ *       focus(gi, ".search-input")
+ *       click(gI, ANIMATE)
+ *       focus(j, goto(next, "RESULT"))
+ *       focus(k, goto(prev, "RESULT"))
+ *   }
+ *
+ * (see the src/sites subfolders for real, working examples)
+ *
+ * The ONLY sugar is `define NAME{ ... }`, rewritten to
+ * `define("NAME", function(){ ... });` before mujs ever sees it, plus
+ * bare key/dir identifiers (`gi`, `next`, ...) as the first argument to
+ * focus/click/longpress/doubleclick/goto, auto-quoted the same way.
+ * `function NAME(args) { ... }` is plain, ordinary JavaScript.
+ *
+ * `focus`/`click`/`longpress`/`doubleclick` accept a selector string, a
+ * function identifier (its ORIGINAL source is captured at the text level,
+ * since mujs doesn't retain source for us, then tagged with a hidden
+ * $muname property so the native callback can look it back up), or the
+ * result of goto(dir, "LOOPNAME").
+ *
+ * Compiling every folder under src/sites/ dynamically discovers new
+ * sites -- dropping in src/sites/newsite/script.js is enough, no build.c
+ * edits required.
+ * ========================================================================= */
 
 #ifndef MUJS_MAX_BINDINGS
 #define MUJS_MAX_BINDINGS 512
@@ -111,6 +154,8 @@ typedef struct {
     int  binding_count;
 } mujs_site_t;
 
+/* name -> exact original source of a `function NAME(...) {...}` decl,
+ * captured while preprocessing (mujs itself keeps no source text). */
 typedef struct {
     char name[64];
     char source[MUJS_VALUE_LEN];
@@ -123,10 +168,17 @@ typedef struct {
     int func_count;
 } mujs_dsl_t;
 
+/* ---- preprocessing: define-sugar, function tagging, key auto-quoting -- */
+
 enum { MUJS_FRAME_PLAIN, MUJS_FRAME_DEFINE, MUJS_FRAME_FUNCTION };
 
 typedef struct { const char *name; int quote_args; } mujs_kwspec_t;
 
+/* quote_args = how many LEADING arguments are always simple bare words
+ * (keys/directions) that should be auto-quoted. Anything past that is
+ * left completely alone by this pass, since it may be an arbitrary
+ * expression (a selector string, a function identifier, a nested
+ * goto(...) call) that a naive comma-scan would mis-parse. */
 static const mujs_kwspec_t MUJS_KEYWORD_ARGS[] = {
     { "focus", 1 }, { "click", 1 }, { "longpress", 1 }, { "doubleclick", 1 }, { "opennew", 1 },
     { "goto", 1 }, { "gotourl", 1 },
@@ -136,6 +188,10 @@ static const mujs_kwspec_t MUJS_KEYWORD_ARGS[] = {
     { NULL, 0 }
 };
 
+/* If *pi points at a bare identifier immediately followed (after
+ * whitespace) by ',' or ')', wrap it in quotes in `out` and advance *pi
+ * past it. Otherwise leaves *pi untouched -- the caller's normal
+ * character-by-character loop handles whatever's actually there. */
 static void mujs__maybe_quote_bare_arg(const char *src, size_t srclen, size_t *pi, char *out, size_t *po) {
     size_t i = *pi, o = *po;
     if (i < srclen && (isalpha((unsigned char)src[i]) || src[i] == '_')) {
@@ -209,7 +265,7 @@ static char *mujs__preprocess(const char *src, mujs_dsl_t *dsl) {
 
             if (ne > ns && k < srclen && src[k] == '{') {
                 o += snprintf(out + o, 256, "define(\"%.*s\", function(){", (int)(ne - ns), src + ns);
-                if (top >= MUJS_MAX_FRAMES) { fprintf(stderr, "MUJS: nesting too deep\n"); exit(1); }
+                if (top >= MUJS_MAX_FRAMES) { fprintf(stderr, "mujscompiler: nesting too deep\n"); exit(1); }
                 frame_kind[top++] = MUJS_FRAME_DEFINE;
                 i = k + 1;
                 continue;
@@ -243,7 +299,7 @@ static char *mujs__preprocess(const char *src, mujs_dsl_t *dsl) {
                     size_t chunk = (p + 1) - i;
                     memcpy(out + o, src + i, chunk);
                     o += chunk;
-                    if (top >= MUJS_MAX_FRAMES) { fprintf(stderr, "MUJS: nesting too deep\n"); exit(1); }
+                    if (top >= MUJS_MAX_FRAMES) { fprintf(stderr, "mujscompiler: nesting too deep\n"); exit(1); }
                     frame_kind[top] = MUJS_FRAME_FUNCTION;
                     frame_start[top] = i;
                     memcpy(frame_name[top], src + ns, namelen);
@@ -255,6 +311,8 @@ static char *mujs__preprocess(const char *src, mujs_dsl_t *dsl) {
             }
         }
 
+        /* auto-quote bare key/dir identifiers as the leading argument(s)
+         * to focus/click/longpress/doubleclick/goto/gotourl/scroll */
         {
             int matched_kw = -1;
             for (int kwi = 0; MUJS_KEYWORD_ARGS[kwi].name; kwi++) {
@@ -293,7 +351,7 @@ static char *mujs__preprocess(const char *src, mujs_dsl_t *dsl) {
         }
 
         if (c == '{') {
-            if (top >= MUJS_MAX_FRAMES) { fprintf(stderr, "MUJS: nesting too deep\n"); exit(1); }
+            if (top >= MUJS_MAX_FRAMES) { fprintf(stderr, "mujscompiler: nesting too deep\n"); exit(1); }
             frame_kind[top++] = MUJS_FRAME_PLAIN;
             out[o++] = src[i++];
             continue;
@@ -314,7 +372,7 @@ static char *mujs__preprocess(const char *src, mujs_dsl_t *dsl) {
                         f->source[len] = '\0';
                         o += snprintf(out + o, 128, "\n%s.$muname = \"%s\";\n", f->name, f->name);
                     } else {
-                        fprintf(stderr, "MUJS: too many function() decls (raise MUJS_MAX_FUNCS)\n");
+                        fprintf(stderr, "mujscompiler: too many function() decls (raise MUJS_MAX_FUNCS)\n");
                         exit(1);
                     }
                 }
@@ -328,11 +386,32 @@ static char *mujs__preprocess(const char *src, mujs_dsl_t *dsl) {
     return out;
 }
 
+/* ---- native callbacks exposed to site scripts --------------------------- */
+
 static mujs_dsl_t *mujs__ctx(js_State *J) { return (mujs_dsl_t *)js_getcontext(J); }
 
 static void mujs__reject(js_State *J, const char *what) {
     js_newerror(J, what);
     js_throw(J);
+}
+
+/* Returns 1 (and leaves an unbind marker object on the stack) if this
+ * call's second argument was omitted -- mujs pads missing args with
+ * `undefined` up to a function's declared arity rather than reducing
+ * the actual argument count, so checking js_isundefined(J, 2) is the
+ * real signal, not js_gettop(). Used by every binding-declaring native
+ * (focus/click/.../action/navigate/scroll/gotourl) so `off(fn(key))`
+ * works uniformly across all of them. Returns 0 (stack untouched) if a
+ * real second argument was given -- the caller proceeds normally. */
+static int mujs__maybe_unbind_marker(js_State *J) {
+    if (!js_isundefined(J, 2)) return 0;
+    const char *keys = js_tostring(J, 1);
+    js_newobject(J);
+    js_pushliteral(J, "__muunbind__");
+    js_setproperty(J, -2, "$type");
+    js_pushstring(J, keys);
+    js_setproperty(J, -2, "keys");
+    return 1;
 }
 
 static void mujs_native_url(js_State *J) {
@@ -351,6 +430,8 @@ static void mujs_native_loop(js_State *J) {
     js_pushundefined(J);
 }
 
+/* goto(next|prev, "LOOPNAME") -- returns a marker object; focus()/click()/
+ * etc interpret it, goto() itself performs no action. */
 static void mujs_native_goto(js_State *J) {
     const char *dir = js_tostring(J, 1);
     const char *loopname = js_tostring(J, 2);
@@ -363,6 +444,10 @@ static void mujs_native_goto(js_State *J) {
     js_setproperty(J, -2, "loop");
 }
 
+/* selected(...) -- a marker object like goto(...), but variadic:
+ * selected() means every loop's current cursor item; selected("MSG",
+ * "RESULT") restricts it to just those named loops. Performs no action
+ * itself -- focus()/click()/etc apply the action to each resolved item. */
 static void mujs_native_selected(js_State *J) {
     int argc = js_gettop(J) - 1; /* stack slot 0 is `this` */
     js_newobject(J);
@@ -376,7 +461,12 @@ static void mujs_native_selected(js_State *J) {
     js_setproperty(J, -2, "loops");
 }
 
+/* gotourl(key, "url") -- a binding declarator like focus/click/etc, not a
+ * target resolver: pressing `key` just navigates the page there. Accepts
+ * absolute ("https://...") or relative ("/settings") URLs, used as-is by
+ * core.js's `location.href = ...`. */
 static void mujs_native_gotourl(js_State *J) {
+    if (mujs__maybe_unbind_marker(J)) return;
     mujs_site_t *s = &mujs__ctx(J)->site;
     if (s->binding_count >= MUJS_MAX_BINDINGS) mujs__reject(J, "too many bindings (raise MUJS_MAX_BINDINGS)");
     mujs_binding_t *b = &s->bindings[s->binding_count++];
@@ -387,7 +477,13 @@ static void mujs_native_gotourl(js_State *J) {
     js_pushundefined(J);
 }
 
+/* scroll(key, up/down, percentage) -- percentage is relative to the
+ * viewport height (50 = half a screen, 100 = a full screen), same idea
+ * as vimium's d/u vs space/shift-space. Pass the word `full` instead of
+ * a number to scroll all the way to the top/bottom of the whole page,
+ * not just one screen's worth. */
 static void mujs_native_scroll(js_State *J) {
+    if (mujs__maybe_unbind_marker(J)) return;
     mujs_site_t *s = &mujs__ctx(J)->site;
     if (s->binding_count >= MUJS_MAX_BINDINGS) mujs__reject(J, "too many bindings (raise MUJS_MAX_BINDINGS)");
 
@@ -404,6 +500,9 @@ static void mujs_native_scroll(js_State *J) {
     if (js_isstring(J, 3)) {
         if (strcmp(js_tostring(J, 3), "full") != 0)
             mujs__reject(J, "scroll()'s third argument must be a percentage number, or the word full");
+        /* Infinity is a real JS global -- window.scrollBy clamps to the
+         * document's actual top/bottom automatically, no core.js
+         * special-casing needed. */
         snprintf(b->value, sizeof(b->value), "Infinity");
     } else {
         snprintf(b->value, sizeof(b->value), "%g", js_tonumber(J, 3));
@@ -419,8 +518,11 @@ static const char *mujs__lookup_func_source(mujs_dsl_t *dsl, const char *name) {
 }
 
 static void mujs__bind(js_State *J, const char *action) {
+    if (mujs__maybe_unbind_marker(J)) return;
+
     mujs_dsl_t *dsl = mujs__ctx(J);
     mujs_site_t *s = &dsl->site;
+
     if (s->binding_count >= MUJS_MAX_BINDINGS) mujs__reject(J, "too many bindings (raise MUJS_MAX_BINDINGS)");
     mujs_binding_t *b = &s->bindings[s->binding_count++];
     snprintf(b->action, sizeof(b->action), "%s", action);
@@ -482,7 +584,10 @@ static void mujs__bind(js_State *J, const char *action) {
     js_pushundefined(J);
 }
 
+/* navigate(key, prev/next) -- steps through browser history, like the
+ * back/forward buttons. */
 static void mujs_native_navigate(js_State *J) {
+    if (mujs__maybe_unbind_marker(J)) return;
     mujs_site_t *s = &mujs__ctx(J)->site;
     if (s->binding_count >= MUJS_MAX_BINDINGS) mujs__reject(J, "too many bindings (raise MUJS_MAX_BINDINGS)");
 
@@ -498,7 +603,11 @@ static void mujs_native_navigate(js_State *J) {
     js_pushundefined(J);
 }
 
+/* action(key, close/reload) -- browser-level tab actions, distinct from
+ * navigate()'s history stepping. close is privileged via the
+ * "window.close" grant in build.c. */
 static void mujs_native_action(js_State *J) {
+    if (mujs__maybe_unbind_marker(J)) return;
     mujs_site_t *s = &mujs__ctx(J)->site;
     if (s->binding_count >= MUJS_MAX_BINDINGS) mujs__reject(J, "too many bindings (raise MUJS_MAX_BINDINGS)");
 
@@ -518,6 +627,31 @@ static void mujs_native_click(js_State *J)       { mujs__bind(J, "click"); }
 static void mujs_native_longpress(js_State *J)   { mujs__bind(J, "longpress"); }
 static void mujs_native_doubleclick(js_State *J) { mujs__bind(J, "doubleclick"); }
 static void mujs_native_opennew(js_State *J)     { mujs__bind(J, "opennew"); }
+
+/* off(click(key)) -- explicitly unbinds `key` on THIS site, even if a
+ * universal site (or the built-in gi/gI defaults) would otherwise fill
+ * it in. Takes the marker produced by calling focus/click/longpress/
+ * doubleclick/opennew with just a key and no target. */
+static void mujs_native_off(js_State *J) {
+    mujs_site_t *s = &mujs__ctx(J)->site;
+
+    if (!js_isobject(J, 1)) mujs__reject(J, "off() expects e.g. click(key) with no target");
+    js_getproperty(J, 1, "$type");
+    int ok = js_isstring(J, -1) && strcmp(js_tostring(J, -1), "__muunbind__") == 0;
+    js_pop(J, 1);
+    if (!ok) mujs__reject(J, "off() expects e.g. click(key) with no target");
+
+    js_getproperty(J, 1, "keys");
+    const char *keys = js_tostring(J, -1);
+
+    if (s->binding_count >= MUJS_MAX_BINDINGS) mujs__reject(J, "too many bindings (raise MUJS_MAX_BINDINGS)");
+    mujs_binding_t *b = &s->bindings[s->binding_count++];
+    snprintf(b->action, sizeof(b->action), "off");
+    snprintf(b->keys, sizeof(b->keys), "%s", keys);
+    snprintf(b->kind, sizeof(b->kind), "off");
+    js_pop(J, 1); /* the keys string */
+    js_pushundefined(J);
+}
 
 static void mujs_native_define(js_State *J) {
     mujs_site_t *s = &mujs__ctx(J)->site;
@@ -546,10 +680,17 @@ static void mujs__register_natives(js_State *J) {
     js_newcfunction(J, mujs_native_longpress, "longpress", 2);   js_setglobal(J, "longpress");
     js_newcfunction(J, mujs_native_doubleclick, "doubleclick", 2); js_setglobal(J, "doubleclick");
     js_newcfunction(J, mujs_native_opennew, "opennew", 2);       js_setglobal(J, "opennew");
+    js_newcfunction(J, mujs_native_off, "off", 1);               js_setglobal(J, "off");
 
+    /* `selected(...)` -- a call (not a bare value): selected() means
+     * every loop's current cursor item; selected("MSG","RESULT") means
+     * just those named loops' current items. Variadic -- declared
+     * length 0, actual arg count read via js_gettop at call time. */
     js_newcfunction(J, mujs_native_selected, "selected", 0);
     js_setglobal(J, "selected");
 }
+
+/* ---- serialize a compiled mujs_site_t into Sites.register({...}) ------- */
 
 static void mujs__json_escape(char *dst, size_t dst_cap, size_t *dst_len, const char *s) {
     dst[(*dst_len)++] = '"';
@@ -634,6 +775,15 @@ static char *mujs__emit_site(const mujs_site_t *s) {
     return out;
 }
 
+/* ---- public entry points -------------------------------------------------
+ *
+ * mujs_compile_site(b, path)     -- compile one site script into b directly
+ * mujs_compile_sites_dir(b, dir) -- dynamically discover every
+ *                                    <dir>/<name>/script.js and compile
+ *                                    them all, in directory order. Drop a
+ *                                    new folder in -- no build.c edits.
+ */
+
 static void mujs_compile_site(build_t *b, const char *path) {
     long len;
     char *raw = build__read_file(path, &len);
@@ -641,7 +791,7 @@ static void mujs_compile_site(build_t *b, const char *path) {
     mujs_dsl_t dsl;
     memset(&dsl, 0, sizeof(dsl));
     dsl.J = js_newstate(NULL, NULL, JS_STRICT);
-    if (!dsl.J) { fprintf(stderr, "MUJS: js_newstate failed\n"); exit(1); }
+    if (!dsl.J) { fprintf(stderr, "mujscompiler: js_newstate failed\n"); exit(1); }
     js_setcontext(dsl.J, &dsl);
     mujs__register_natives(dsl.J);
 
@@ -649,14 +799,14 @@ static void mujs_compile_site(build_t *b, const char *path) {
     free(raw);
 
     if (js_ploadstring(dsl.J, path, js)) {
-        fprintf(stderr, "MUJS: parse error in %s:\n  %s\n", path, js_trystring(dsl.J, -1, "error"));
+        fprintf(stderr, "mujscompiler: parse error in %s:\n  %s\n", path, js_trystring(dsl.J, -1, "error"));
         exit(1);
     }
     free(js);
 
     js_pushundefined(dsl.J); /* `this` for the top-level script function */
     if (js_pcall(dsl.J, 0)) {
-        fprintf(stderr, "MUJS: error compiling %s:\n  %s\n", path, js_trystring(dsl.J, -1, "error"));
+        fprintf(stderr, "mujscompiler: error compiling %s:\n  %s\n", path, js_trystring(dsl.J, -1, "error"));
         exit(1);
     }
     js_pop(dsl.J, 1);
@@ -671,7 +821,7 @@ static void mujs_compile_site(build_t *b, const char *path) {
 static void mujs_compile_sites_dir(build_t *b, const char *sites_dir) {
     DIR *d = opendir(sites_dir);
     if (!d) {
-        fprintf(stderr, "MUJS: no %s directory (nothing to compile)\n", sites_dir);
+        fprintf(stderr, "mujscompiler: no %s directory (nothing to compile)\n", sites_dir);
         return;
     }
 
@@ -691,12 +841,12 @@ static void mujs_compile_sites_dir(build_t *b, const char *sites_dir) {
         snprintf(script, sizeof(script), "%s/script.js", subpath);
         FILE *f = fopen(script, "rb");
         if (!f) {
-            fprintf(stderr, "MUJS: skipping %s (no script.js)\n", subpath);
+            fprintf(stderr, "mujscompiler: skipping %s (no script.js)\n", subpath);
             continue;
         }
         fclose(f);
 
-        printf("MUJS: compiling %s\n", script);
+        printf("mujscompiler: compiling %s\n", script);
         mujs_compile_site(b, script);
     }
     closedir(d);

@@ -17,4 +17,6 @@ define BRAVE {
 
     scroll(gg, up, full)
     scroll(G, down, 100)
+
+    off(action(r)) //turns off the r action for the website
 }
