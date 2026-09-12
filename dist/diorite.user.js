@@ -115,6 +115,34 @@ function resolveSelected(loopNames) {
 		.filter(function (el) { return el && el.isConnected; });
 }
 
+function resolveYankTarget(b) {
+	if (!b.hasTarget) return null;
+	if (b.targetKind === "selector") return document.querySelector(b.targetValue);
+	if (b.targetKind === "goto") return gotoLoop(b.targetLoop, b.targetDir);
+	if (b.targetKind === "selected") {
+		var els = resolveSelected(b.targetSelLoops);
+		return els.length ? els[0] : null;
+	}
+	if (b.targetKind === "function") return b.targetValue(document.activeElement, MU);
+	return null;
+}
+
+function resolveYankUrl(b) {
+	var target = resolveYankTarget(b);
+	if (!target) return location.href;
+	if (typeof target === "string") return target; // a custom function returned a URL directly
+	if (target.tagName === "A" && target.href) return target.href;
+	if (target.closest) {
+		var ancestorLink = target.closest("a[href]");
+		if (ancestorLink) return ancestorLink.href;
+	}
+	if (target.querySelector) {
+		var innerLink = target.querySelector("a[href]");
+		if (innerLink) return innerLink.href;
+	}
+	return location.href;
+}
+
 var scrollAnimId = null;
 
 function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
@@ -255,6 +283,23 @@ function performBinding(b) {
 		}
 		return;
 	}
+	if (b.kind === "root") {
+		location.href = location.origin;
+		return;
+	}
+	if (b.kind === "branch") {
+		var path = location.pathname;
+		if (path.length > 1 && path.charAt(path.length - 1) === "/") path = path.slice(0, -1);
+		var upIdx = path.lastIndexOf("/");
+		location.href = location.origin + (upIdx > 0 ? path.slice(0, upIdx) : "/");
+		return;
+	}
+	if (b.kind === "yankurl") {
+		var yankedUrl = resolveYankUrl(b);
+		GM_setClipboard(yankedUrl);
+		showYankPopup(yankedUrl);
+		return;
+	}
 	if (b.kind === "off") {
 		return;
 	}
@@ -314,6 +359,14 @@ function isEditableTarget(el) {
 	return el.isContentEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 }
 
+function getDeepActiveElement() {
+	var el = document.activeElement;
+	while (el && el.shadowRoot && el.shadowRoot.activeElement) {
+		el = el.shadowRoot.activeElement;
+	}
+	return el;
+}
+
 function resetKeyBuffer() {
 	keyBuffer = "";
 	if (keyTimer) { clearTimeout(keyTimer); keyTimer = null; }
@@ -328,10 +381,15 @@ function clearAllHighlights() {
 }
 
 document.addEventListener("keydown", function (ev) {
-	var editing = isEditableTarget(ev.target) || isEditableTarget(document.activeElement);
+	var realTarget = (typeof ev.composedPath === "function" && ev.composedPath()[0]) || ev.target;
+
+	var deepActive = getDeepActiveElement();
+	var editing = isEditableTarget(realTarget) || isEditableTarget(ev.target) ||
+		isEditableTarget(document.activeElement) || isEditableTarget(deepActive);
 
 	if (ev.key === "Escape") {
 		if (editing) {
+			if (deepActive && deepActive.blur) deepActive.blur();
 			if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
 			if (ev.target && ev.target.blur) ev.target.blur();
 		}
@@ -384,9 +442,44 @@ document.addEventListener("keydown", function (ev) {
 (function injectStyle() {
 	var style = document.createElement("style");
 	style.textContent =
-		".mu-cursor { outline: 2px solid #4f9dff !important; outline-offset: 2px !important; }";
+		".mu-cursor { outline: 2px solid #4f9dff !important; outline-offset: 2px !important; }" +
+		".mu-yank-popup {" +
+		"  position: fixed; bottom: 24px; right: 24px; z-index: 2147483647;" +
+		"  background: #1e1e1e; color: #eee; font-family: monospace; font-size: 13px;" +
+		"  padding: 8px 12px; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.4);" +
+		"  opacity: 1; transition: opacity 0.2s ease-out; pointer-events: none;" +
+		"  max-width: 60vw; overflow-wrap: break-word;" +
+		"}" +
+		".mu-yank-popup .mu-yank-label { color: #4f9dff; font-weight: bold; }" +
+		".mu-yank-popup.mu-yank-popup-hide { opacity: 0; }";
 	(document.head || document.documentElement).appendChild(style);
 })();
+
+var yankPopupTimer = null;
+function showYankPopup(url) {
+	var existing = document.querySelector(".mu-yank-popup");
+	if (existing) existing.remove();
+	if (yankPopupTimer) clearTimeout(yankPopupTimer);
+
+	var el = document.createElement("div");
+	el.className = "mu-yank-popup";
+
+	var label = document.createElement("div");
+	label.className = "mu-yank-label";
+	label.textContent = "yanked";
+
+	var urlLine = document.createElement("div");
+	urlLine.textContent = ":" + url;
+
+	el.appendChild(label);
+	el.appendChild(urlLine);
+	document.body.appendChild(el);
+
+	yankPopupTimer = setTimeout(function () {
+		el.classList.add("mu-yank-popup-hide");
+		setTimeout(function () { el.remove(); }, 200);
+	}, 1200);
+}
 
 // ---- generated: compiled site definitions ----
 Sites.register({

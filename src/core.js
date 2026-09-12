@@ -127,6 +127,39 @@ function resolveSelected(loopNames) {
 		.filter(function (el) { return el && el.isConnected; });
 }
 
+// Resolves yankurl()'s optional target into an actual URL string.
+// No target at all -> the current page's URL. A resolved element with
+// no direct link -> its closest/nested <a href>, if any. Falls back to
+// the current page's URL if nothing usable is found, rather than
+// copying nothing.
+function resolveYankTarget(b) {
+	if (!b.hasTarget) return null;
+	if (b.targetKind === "selector") return document.querySelector(b.targetValue);
+	if (b.targetKind === "goto") return gotoLoop(b.targetLoop, b.targetDir);
+	if (b.targetKind === "selected") {
+		var els = resolveSelected(b.targetSelLoops);
+		return els.length ? els[0] : null;
+	}
+	if (b.targetKind === "function") return b.targetValue(document.activeElement, MU);
+	return null;
+}
+
+function resolveYankUrl(b) {
+	var target = resolveYankTarget(b);
+	if (!target) return location.href;
+	if (typeof target === "string") return target; // a custom function returned a URL directly
+	if (target.tagName === "A" && target.href) return target.href;
+	if (target.closest) {
+		var ancestorLink = target.closest("a[href]");
+		if (ancestorLink) return ancestorLink.href;
+	}
+	if (target.querySelector) {
+		var innerLink = target.querySelector("a[href]");
+		if (innerLink) return innerLink.href;
+	}
+	return location.href;
+}
+
 // ---- self-owned smooth scrolling ------------------------------------------
 //
 // Deliberately NOT using the browser's native `behavior: "smooth"`. Native
@@ -306,6 +339,26 @@ function performBinding(b) {
 		}
 		return;
 	}
+	if (b.kind === "root") {
+		location.href = location.origin;
+		return;
+	}
+	if (b.kind === "branch") {
+		var path = location.pathname;
+		if (path.length > 1 && path.charAt(path.length - 1) === "/") path = path.slice(0, -1);
+		var upIdx = path.lastIndexOf("/");
+		location.href = location.origin + (upIdx > 0 ? path.slice(0, upIdx) : "/");
+		return;
+	}
+	if (b.kind === "yankurl") {
+		// Privileged via the "GM_setClipboard" grant declared in
+		// build.c -- sidesteps the focus/permission flakiness the
+		// plain navigator.clipboard API can hit.
+		var yankedUrl = resolveYankUrl(b);
+		GM_setClipboard(yankedUrl);
+		showYankPopup(yankedUrl);
+		return;
+	}
 	if (b.kind === "off") {
 		// Deliberately does nothing. Its whole purpose is just to
 		// exist and claim this key at the specific-site layer, so
@@ -386,6 +439,20 @@ function isEditableTarget(el) {
 	return el.isContentEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 }
 
+// document.activeElement stops at a shadow host -- for a real input
+// living inside an OPEN shadow root (e.g. a Ctrl+K search overlay built
+// with attachShadow({mode:'open'})), activeElement reports the host
+// <div>, never the actual focused <input> inside it. Descending through
+// .shadowRoot.activeElement (recursively, in case of nested shadow
+// trees) finds the real focused element instead.
+function getDeepActiveElement() {
+	var el = document.activeElement;
+	while (el && el.shadowRoot && el.shadowRoot.activeElement) {
+		el = el.shadowRoot.activeElement;
+	}
+	return el;
+}
+
 function resetKeyBuffer() {
 	keyBuffer = "";
 	if (keyTimer) { clearTimeout(keyTimer); keyTimer = null; }
@@ -402,20 +469,31 @@ function clearAllHighlights() {
 }
 
 document.addEventListener("keydown", function (ev) {
-	// Checked against BOTH ev.target and document.activeElement, not
-	// just one -- rich-text editors (Instagram's Lexical editor is one)
-	// do brief internal focus/blur churn where the two can momentarily
-	// disagree. Relying on only one left a gap where a key like the
-	// trailing "g" in "bang" could get swallowed as a potential prefix
-	// of a binding like "gg" instead of being typed, while very much
-	// still inside the input as far as the user could tell.
-	var editing = isEditableTarget(ev.target) || isEditableTarget(document.activeElement);
+	// event.target is retargeted to the shadow HOST for any listener
+	// outside the shadow tree -- same blind spot as activeElement, same
+	// fix: composedPath()[0] is the actual originating element,
+	// piercing an open shadow boundary (a closed one hides it by the
+	// shadow author's own deliberate choice, which nothing here can or
+	// should override).
+	var realTarget = (typeof ev.composedPath === "function" && ev.composedPath()[0]) || ev.target;
+
+	// Checked against ev.target, document.activeElement, AND their
+	// shadow-DOM-aware equivalents -- rich-text editors (Instagram's
+	// Lexical editor is one) do brief internal focus/blur churn where
+	// plain ev.target/activeElement can momentarily disagree, and a
+	// shadow-DOM overlay (Instagram's own Ctrl+K search, for one) hides
+	// the real focused element from both entirely unless you descend
+	// into shadowRoot.activeElement.
+	var deepActive = getDeepActiveElement();
+	var editing = isEditableTarget(realTarget) || isEditableTarget(ev.target) ||
+		isEditableTarget(document.activeElement) || isEditableTarget(deepActive);
 
 	// Escape always exits "insert mode" AND breaks any active loop/goto
 	// cursor -- checked before the editable-target bailout below, since
 	// that's precisely when it's needed.
 	if (ev.key === "Escape") {
 		if (editing) {
+			if (deepActive && deepActive.blur) deepActive.blur();
 			if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
 			if (ev.target && ev.target.blur) ev.target.blur();
 		}
@@ -464,11 +542,51 @@ document.addEventListener("keydown", function (ev) {
 	}
 }, true);
 
-// ---- kagi-style cursor highlight, injected once -------------------------
+// ---- kagi-style cursor highlight + yank popup, injected once ------------
 
 (function injectStyle() {
 	var style = document.createElement("style");
 	style.textContent =
-		".mu-cursor { outline: 2px solid #4f9dff !important; outline-offset: 2px !important; }";
+		".mu-cursor { outline: 2px solid #4f9dff !important; outline-offset: 2px !important; }" +
+		".mu-yank-popup {" +
+		"  position: fixed; bottom: 24px; right: 24px; z-index: 2147483647;" +
+		"  background: #1e1e1e; color: #eee; font-family: monospace; font-size: 13px;" +
+		"  padding: 8px 12px; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.4);" +
+		"  opacity: 1; transition: opacity 0.2s ease-out; pointer-events: none;" +
+		"  max-width: 60vw; overflow-wrap: break-word;" +
+		"}" +
+		".mu-yank-popup .mu-yank-label { color: #4f9dff; font-weight: bold; }" +
+		".mu-yank-popup.mu-yank-popup-hide { opacity: 0; }";
 	(document.head || document.documentElement).appendChild(style);
 })();
+
+// Small toast confirming a yank, e.g.:
+//   yanked
+//   :https://example.com/page
+// Built with textContent (not innerHTML) since the URL is arbitrary
+// page content, not something to trust as markup.
+var yankPopupTimer = null;
+function showYankPopup(url) {
+	var existing = document.querySelector(".mu-yank-popup");
+	if (existing) existing.remove();
+	if (yankPopupTimer) clearTimeout(yankPopupTimer);
+
+	var el = document.createElement("div");
+	el.className = "mu-yank-popup";
+
+	var label = document.createElement("div");
+	label.className = "mu-yank-label";
+	label.textContent = "yanked";
+
+	var urlLine = document.createElement("div");
+	urlLine.textContent = ":" + url;
+
+	el.appendChild(label);
+	el.appendChild(urlLine);
+	document.body.appendChild(el);
+
+	yankPopupTimer = setTimeout(function () {
+		el.classList.add("mu-yank-popup-hide");
+		setTimeout(function () { el.remove(); }, 200);
+	}, 1200);
+}
