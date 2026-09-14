@@ -1,6 +1,6 @@
 ![image](./tools/Diorite.png)
 
-Diorite is a scripting language that lets you shape your own keybinding for almost* any website using userscript. Its almost in a good shape and production ready but its enough to use on any web.
+Diorite is a scripting language that lets you shape your own keybinding for almost* any website using userscript. Its almost in a good shape and production ready.
 
 You just fork it and do your thing and just use make file to compile.
 
