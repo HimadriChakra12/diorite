@@ -16,7 +16,7 @@ listgrant(
     );
 
 listextra(
-    { "//NAME", "//Description" },
+    { "icon", "https://minecraft.wiki/images/Polished_Diorite_%28inventory%29_MCE.png?f7e24" },
     );
 
 listorder(

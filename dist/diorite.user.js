@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         diorite
 // @namespace    https://github.com/HimadriChakra12/diorite.git
-// @version      6.0.0
+// @version      7.0.0
 // @description  Persite Keybinding Userscript
 // @match        *://*/*
 // @grant        window.close
-// @//NAME       //Description
+// @icon         https://minecraft.wiki/images/Polished_Diorite_%28inventory%29_MCE.png?f7e24
 // @run-at       document-start
 // ==/UserScript==
 
