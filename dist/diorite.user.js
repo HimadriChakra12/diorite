@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         diorite
 // @namespace    https://github.com/HimadriChakra12/diorite.git
-// @version      8.0.0
+// @version      9.0.0
 // @description  Persite Keybinding Userscript
 // @match        *://*/*
 // @grant        window.close
@@ -78,6 +78,19 @@ function dedupeLastWins(bindings) {
 	return order.map(function (k) { return byKey[k]; });
 }
 
+function defaultsFilter() {
+	var disableAll = false;
+	var disabledKeys = {};
+	function collect(site) {
+		if (!site) return;
+		if (site.disableDefaults) disableAll = true;
+		(site.disabledDefaultKeys || []).forEach(function (k) { disabledKeys[k] = true; });
+	}
+	collect(activeSite());
+	universalSites().forEach(collect);
+	return { disableAll: disableAll, disabledKeys: disabledKeys };
+}
+
 function effectiveBindings() {
 	var seen = {};
 	var result = [];
@@ -90,7 +103,11 @@ function effectiveBindings() {
 	var specific = activeSite();
 	if (specific) addAll(dedupeLastWins(specific.bindings));
 	universalSites().forEach(function (site) { addAll(dedupeLastWins(site.bindings)); });
-	addAll(DEFAULT_BINDINGS);
+
+	var filter = defaultsFilter();
+	if (!filter.disableAll) {
+		addAll(DEFAULT_BINDINGS.filter(function (b) { return !filter.disabledKeys[b.keys]; }));
+	}
 
 	return result;
 }
@@ -290,7 +307,7 @@ function performBinding(b) {
 		location.href = location.origin;
 		return;
 	}
-	if (b.kind === "branch") {
+	if (b.kind === "superset") {
 		var path = location.pathname;
 		if (path.length > 1 && path.charAt(path.length - 1) === "/") path = path.slice(0, -1);
 		var upIdx = path.lastIndexOf("/");
@@ -489,6 +506,8 @@ Sites.register({
   name: "BRAVE",
   match: ["*://search.brave.com/*"],
   loops: {"RESULT": ".title.search-snippet-title.line-clamp-1.svelte-14r20fy"},
+  disableDefaults: false,
+  disabledDefaultKeys: [],
   bindings: [
     { keys: "j", action: "focus", kind: "goto", dir: "next", loop: "RESULT" },
     { keys: "k", action: "focus", kind: "goto", dir: "prev", loop: "RESULT" },
@@ -509,6 +528,8 @@ Sites.register({
   name: "SPOTIFY",
   match: ["*://open.spotify.com/*"],
   loops: {"RESULT": "[data-testid='tracklist-row']"},
+  disableDefaults: false,
+  disabledDefaultKeys: [],
   bindings: [
     { keys: "j", action: "focus", kind: "goto", dir: "next", loop: "RESULT" },
     { keys: "k", action: "focus", kind: "goto", dir: "prev", loop: "RESULT" },
@@ -523,6 +544,8 @@ Sites.register({
   name: "UNIVERSAL",
   match: [],
   loops: {},
+  disableDefaults: false,
+  disabledDefaultKeys: [],
   bindings: [
     { keys: "j", action: "scroll", kind: "scroll", dir: "down", amount: 50 },
     { keys: "k", action: "scroll", kind: "scroll", dir: "up", amount: 50 },
