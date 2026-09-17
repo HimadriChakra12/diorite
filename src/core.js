@@ -276,8 +276,11 @@ function doLongpress(el) {
 }
 function doDoubleclick(el) {
 	if (!el) return;
-	el.click();
-	fireMouseEvent(el, "dblclick");
+	var ev = new Event("dblclick", {
+		bubbles: true,
+		cancelable: true
+	});
+	el.dispatchEvent(ev);
 }
 
 function doScroll(dir, amount) {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         diorite
 // @namespace    https://github.com/HimadriChakra12/diorite.git
-// @version      7.0.0
+// @version      8.0.0
 // @description  Persite Keybinding Userscript
 // @match        *://*/*
 // @grant        window.close
@@ -231,8 +231,11 @@ function doLongpress(el) {
 }
 function doDoubleclick(el) {
 	if (!el) return;
-	el.click();
-	fireMouseEvent(el, "dblclick");
+	var ev = new Event("dblclick", {
+		bubbles: true,
+		cancelable: true
+	});
+	el.dispatchEvent(ev);
 }
 
 function doScroll(dir, amount) {
