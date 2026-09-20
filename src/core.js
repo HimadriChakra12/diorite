@@ -136,6 +136,7 @@ function findLoopSelector(loopName) {
 // ---- loop / goto cursor --------------------------------------------------
 
 var loopCursor = {};       // loopName -> the actual highlighted Element (not an index -- see gotoLoop)
+var lastActiveLoopName = null; // whichever loop a goto() call most recently touched -- see active()
 var lastHighlighted = null;
 
 // Resolves selected(...)'s loop-name list into actual elements: every
@@ -272,6 +273,7 @@ function gotoLoop(loopName, dir) {
 
 	var el = els[idx];
 	loopCursor[loopName] = el;
+	lastActiveLoopName = loopName;
 
 	console.log("[site-vim] gotoLoop(%s, %s): %d matched elements, idx -> %d%s, target =",
 		loopName, dir, els.length, idx, recycled ? " (previous target was recycled out of the DOM)" : "", el);
@@ -402,6 +404,10 @@ function performBinding(b) {
 	var el = null;
 	if (b.kind === "selector") el = document.querySelector(b.value);
 	else if (b.kind === "goto") el = gotoLoop(b.loop, b.dir);
+	else if (b.kind === "active") {
+		var activeEl = lastActiveLoopName ? loopCursor[lastActiveLoopName] : null;
+		el = (activeEl && activeEl.isConnected) ? activeEl : null;
+	}
 	if (!el) return;
 	var act = ACTIONS[b.action];
 	if (act) act(el);
@@ -538,7 +544,18 @@ document.addEventListener("keydown", function (ev) {
 	var stillPossible = bindings.some(function (b) { return b.keys.indexOf(candidate) === 0; });
 
 	if (exact.length) {
+		// preventDefault() alone only stops the BROWSER's own default
+		// action for this key (scrolling on Space, Ctrl+F opening
+		// find, ...) -- it does nothing to stop other JS listeners
+		// already on the page, including the site's own keyboard
+		// shortcuts. stopPropagation()/stopImmediatePropagation() are
+		// what actually keep a key we've claimed from also triggering
+		// whatever Spotify/Instagram/etc. bound to it themselves. This
+		// is deliberately unconditional: any key we successfully
+		// match takes full ownership of that keystroke.
 		ev.preventDefault();
+		ev.stopPropagation();
+		ev.stopImmediatePropagation();
 		var now = Date.now();
 		var tooSoon = candidate === lastFiredKeys && (now - lastFiredTime) < MIN_REPEAT_MS;
 		console.log("[site-vim] key=%s (raw=%s) candidate=%s repeat=%s -> %s",
@@ -557,6 +574,8 @@ document.addEventListener("keydown", function (ev) {
 	if (stillPossible) {
 		console.log("[site-vim] key=%s (raw=%s) candidate=%s -> buffering (waiting for more keys)", key, ev.key, candidate);
 		ev.preventDefault();
+		ev.stopPropagation();
+		ev.stopImmediatePropagation();
 		keyBuffer = candidate;
 		if (keyTimer) clearTimeout(keyTimer);
 		keyTimer = setTimeout(resetKeyBuffer, SEQUENCE_TIMEOUT_MS);

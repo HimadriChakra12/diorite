@@ -643,6 +643,20 @@ static void mujs_native_selected(js_State *J) {
     js_setproperty(J, -2, "loops");
 }
 
+/* active() -- a marker object like selected(), but always resolves at
+ * runtime to whichever loop's cursor was most recently moved by a
+ * goto() call, regardless of its name. Where selected() needs you to
+ * say which loop(s) you mean, active() means "whichever one I'm
+ * actually navigating right now" -- the natural fit for one key that
+ * should act on whichever list currently has your attention (e.g. one
+ * `enter` binding shared between a playlist loop and a search-results
+ * loop, each moved with its own j/k pair). Takes no arguments. */
+static void mujs_native_active(js_State *J) {
+    js_newobject(J);
+    js_pushliteral(J, "__muactive__");
+    js_setproperty(J, -2, "$type");
+}
+
 /* gotourl(key, "url") -- a binding declarator like focus/click/etc, not a
  * target resolver: pressing `key` just navigates the page there. Accepts
  * absolute ("https://...") or relative ("/settings") URLs, used as-is by
@@ -730,6 +744,7 @@ static void mujs__resolve_target(js_State *J, int idx, mujs_dsl_t *dsl, mujs_bin
         const char *type = js_isstring(J, -1) ? js_tostring(J, -1) : "";
         int is_goto = strcmp(type, "__mugoto__") == 0;
         int is_selected = strcmp(type, "__muselected__") == 0;
+        int is_active = strcmp(type, "__muactive__") == 0;
         js_pop(J, 1);
 
         if (is_selected) {
@@ -752,11 +767,13 @@ static void mujs__resolve_target(js_State *J, int idx, mujs_dsl_t *dsl, mujs_bin
             js_getproperty(J, idx, "loop");
             snprintf(b->loopname, sizeof(b->loopname), "%s", js_tostring(J, -1));
             js_pop(J, 1);
+        } else if (is_active) {
+            snprintf(b->kind, sizeof(b->kind), "active");
         } else {
-            mujs__reject(J, "expected a selector, a function, goto(...), or selected(...)");
+            mujs__reject(J, "expected a selector, a function, goto(...), selected(...), or active()");
         }
     } else {
-        mujs__reject(J, "expected a selector, a function, goto(...), or selected(...)");
+        mujs__reject(J, "expected a selector, a function, goto(...), selected(...), or active()");
     }
 }
 
@@ -1041,6 +1058,8 @@ static void mujs__register_natives(js_State *J) {
      * length 0, actual arg count read via js_gettop at call time. */
     js_newcfunction(J, mujs_native_selected, "selected", 0);
     js_setglobal(J, "selected");
+    js_newcfunction(J, mujs_native_active, "active", 0);
+    js_setglobal(J, "active");
 }
 
 /* ---- serialize a compiled mujs_site_t into Sites.register({...}) ------- */
